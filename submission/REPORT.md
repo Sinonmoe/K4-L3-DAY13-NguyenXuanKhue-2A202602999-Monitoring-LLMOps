@@ -54,21 +54,41 @@
 
 ## 5. Tracing và prompt versioning
 
-- **Cách xác nhận traces do chính tôi tạo trong project cá nhân:**
+- **Cách xác nhận traces do chính tôi tạo trong project cá nhân:** Tất cả các trace được đẩy trực tiếp về project Langfuse riêng của tôi (`day13-k4-l3a-2A202602999`) qua API keys cấu hình trong `.env`. Trace metadata chứa thông tin định danh: `user_id_hash` (băm từ mã sinh viên 2A202602999), `session_id`, `environment: dev`, tags `["lab", feature, "claude-sonnet-4-5"]` và correlation ID tương ứng.
 - **Cấu trúc root/retrieval/generation observations:**
-- **Cách nối trace với log:**
-- **Prompt name:**
-- **Version/label baseline:**
-- **Version/label candidate:**
+  - Root observation: `lab-agent-run` (type `agent`), bao quát toàn bộ vòng đời của request.
+  - Observation con 1: `retrieval` (type `retriever`), đo đạc bước tra cứu tài liệu với metadata `doc_count`, input và output sanitized.
+  - Observation con 2: `generation` (type `generation`), đo bước gọi LLM (`FakeLLM`), nhận link prompt từ Langfuse, ghi nhận model, `usage_details` (input/output tokens) và `cost_details` (USD).
+  - Cấu trúc cây quan hệ cha–con hiển thị rõ ràng trên trace waterfall, cho phép phân biệt chính xác khi xảy ra nghẽn ở bước retrieval (chậm >2.5s) hay generation.
+- **Cách nối trace với log:** `correlation_id` được sinh từ middleware và gắn đồng thời vào `data/logs.jsonl` (qua structlog contextvars) và trace metadata trên Langfuse (qua `propagate_attributes(metadata={"correlation_id": correlation_id})`). Ta có thể copy correlation ID từ log line bất kỳ rồi dán vào ô tìm kiếm metadata trên Langfuse để mở đúng trace.
+- **Prompt name:** `day13-chat`
+- **Version/label baseline:** Version 1, gắn nhãn `baseline` và `production` ban đầu. Template: `Feature={{feature}}\nDocs={{docs}}\nQuestion={{message}}`.
+- **Version/label candidate:** Version 2, gắn nhãn `candidate`. Template có tinh chỉnh: `Feature={{feature}}\nDocs={{docs}}\nQuestion={{message}}\nTrả lời ngắn gọn, súc tích trong 2 câu.`
 - **Trace ID của mỗi version:**
+  - Trace ID dùng Version 1 (`production` / `baseline`): `<Dán trace ID từ Langfuse sau khi gửi request với label production/baseline>`
+  - Trace ID dùng Version 2 (`candidate`): `<Dán trace ID từ Langfuse sau khi gửi request với label candidate>`
 - **Cách promote và rollback `production`:**
+  - **Promote:** Trên Langfuse Cloud, mở prompt `day13-chat` > chọn Version 2 > gán thêm nhãn `production` (chuyển nhãn từ v1 sang v2).
+  - **Rollback:** Khi cần khôi phục lại bản cũ, mở danh sách versions của `day13-chat` > chọn lại Version 1 > gán nhãn `production` về Version 1. Ứng dụng tự động lấy đúng bản v1 trong lần gọi tiếp theo mà không cần sửa code hay redeploy.
 
 ## 6. Dashboard, SLO và alerts
 
-- **Dashboard và sáu panel:**
-- **SLO và lý do chọn:**
+- **Dashboard và sáu panel:** Dựng đúng theo contract `config/dashboard.yaml` tại endpoint `/dashboard` (hoặc Streamlit), đọc từ `data/logs.jsonl` trong cửa sổ 60 phút và làm mới mỗi 30s:
+  1. *Latency percentiles and TTFT* (ms): P50, P95, P99 và TTFT P95; threshold P95 &le; 3000 ms.
+  2. *Request traffic* (requests_per_minute): số lượng request và tốc độ req/phút; threshold &ge; 1 req/min.
+  3. *Error rate and retrieval success* (%): tỉ lệ lỗi, phân loại lỗi theo `error_type`, và tỉ lệ retrieval thành công (`tool_success == true`); threshold error rate &le; 2%.
+  4. *Cost over time* (USD): tổng chi phí token trong cửa sổ thời gian; threshold &le; $2.50.
+  5. *Input and output tokens* (tokens): tổng tokens nạp vào và tạo ra; threshold &le; 50,000 tokens.
+  6. *Quality proxy* (score 0-1): điểm số chất lượng phản hồi trung bình; threshold &ge; 0.75.
+- **SLO và lý do chọn:** Chọn `fast_successful_requests` với mục tiêu 99.5% requests đạt chuẩn (`event == "response_sent"` và `latency_ms <= 3000`) trong cửa sổ 28 ngày. Lý do chọn: Baseline bình thường đạt ~150ms. Ngưỡng 3000ms là ranh giới trải nghiệm người dùng đối với chat trợ lý LLM; nếu retrieval bị nghẽn (chẳng hạn incident `rag_slow` thêm 2500ms delay), latency sẽ lập tức chạm ngưỡng 3s để cảnh báo kịp thời trước khi timeout.
 - **Cách tính error budget:**
+  - Với SLO 99.5%, ngân sách lỗi (Error Budget) là `100% - 99.5% = 0.5%`.
+  - Nếu hệ thống nhận 100,000 requests trong chu kỳ 28 ngày, Error Budget cho phép tối đa `100,000 * 0.5% = 500` bad requests (requests bị lỗi 500 hoặc có latency > 3000ms).
+  - Khi số bad requests vượt quá 500, ngân sách lỗi cạn kiệt (Burn rate cao), kích hoạt chính sách đóng băng deploy tính năng mới để tập trung khắc phục sự cố.
 - **Ba alert và runbook tương ứng:**
+  1. `HighTailLatency`: Severity critical, duration 5m, condition `p95(latency_ms) > 3000ms`, channel `#alerts-llmops`, owner `oncall-backend`, runbook `docs/alerts.md#alert-1`.
+  2. `HighErrorRate`: Severity critical, duration 3m, condition `error_rate_pct > 2%`, channel `#alerts-llmops`, owner `oncall-backend`, runbook `docs/alerts.md#alert-2`.
+  3. `LowRetrievalSuccess`: Severity warning, duration 5m, condition `retrieval_success_rate_pct < 90%`, channel `#alerts-rag`, owner `oncall-rag`, runbook `docs/alerts.md#alert-3`.
 
 ## 7. Điều tra challenge
 
