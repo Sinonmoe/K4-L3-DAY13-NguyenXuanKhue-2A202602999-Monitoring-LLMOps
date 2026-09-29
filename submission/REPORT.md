@@ -4,13 +4,13 @@
 
 ## 1. Thông tin học viên
 
-- **Họ và tên:**
-- **MSSV:**
+- **Họ và tên:** Nguyễn Xuân Khuê
+- **MSSV:** 2A202602999
 - **Lớp:** K4-L3A
-- **Repository URL:**
+- **Repository URL:** https://github.com/Sinonmoe/K4-L3-DAY13-NguyenXuanKhue-2A202602999-Monitoring-LLMOps
 - **Commit SHA cuối:**
 - **Challenge ID:**
-- **Tên project Langfuse cá nhân:** `day13-k4-l3a-<MSSV>`
+- **Tên project Langfuse cá nhân:** `day13-k4-l3a-2A202602999`
 
 ## 2. Evidence index
 
@@ -37,20 +37,20 @@
 
 | Nội dung | Baseline | Kết quả cuối | Nhận xét |
 |---|---|---|---|
-| `validate_logs.py` | | | |
-| `validate_dashboard.py` | | | |
-| `pytest` | | | |
-| Số traces hợp lệ | | | |
-| Số PII leak | | | |
-| Latency P95 / TTFT P95 | | | |
-| Retrieval success rate | | | |
+| `validate_logs.py` |30/100 | | |
+| `validate_dashboard.py` |6/6 panel hợp lệ | | |
+| `pytest` |22/22 passed | | |
+| Số traces hợp lệ |0 trace | | |
+| Số PII leak |0 leak | | |
+| Latency P95 / TTFT P95 |151 ms / 50 ms | | |
+| Retrieval success rate |100% (10/10) | | |
 
 ## 4. Logging và PII
 
-- **Cách tạo/nhận và truyền correlation ID:**
-- **Các metadata được ghi vào structured log:**
-- **Cách bảo đảm PII được scrub trước khi ghi:**
-- **Cách kiểm chứng kết quả:**
+- **Cách tạo/nhận và truyền correlation ID:** Trong `CorrelationIdMiddleware` (`app/middleware.py`), mỗi request được gọi `clear_contextvars()` để xóa context cũ. Sau đó kiểm tra header `x-request-id`, nếu có thì sử dụng lại, nếu không thì sinh mới theo format `req-<8-hex>` (`f"req-{uuid.uuid4().hex[:8]}"`). ID này được gắn vào `bind_contextvars(correlation_id=correlation_id)` cho structlog, gán vào `request.state.correlation_id` cho handler, và trả lại qua header `x-request-id` cùng `x-response-time-ms`.
+- **Các metadata được ghi vào structured log:** Các trường chuẩn theo schema gồm `ts` (UTC ISO), `level`, `service`, `event`, `correlation_id`. Trong endpoint `/chat` (`app/main.py`), các trường ngữ cảnh được bind trước khi ghi log gồm `user_id_hash` (SHA256 12 ký tự), `session_id`, `feature`, `model`, `env`. Khi kết thúc request bổ sung thêm: `latency_ms`, `ttft_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `quality_score`, `tool_name`, `tool_success`, và `payload` đã được che PII.
+- **Cách bảo đảm PII được scrub trước khi ghi:** Xây dựng các regex chuẩn hóa trong `app/pii.py` cho `email`, `phone_vn`, `credit_card`, `cccd` và thay thế bằng `[REDACTED_<TYPE>]`. Đăng ký `scrub_event` như một structlog processor đệ quy chạy trước `JsonlFileProcessor()` và `JSONRenderer()`, đảm bảo mọi trường dữ liệu string hoặc cấu trúc lồng nhau trong event dict đều được che sạch trước khi ghi ra file `data/logs.jsonl` hoặc stdout.
+- **Cách kiểm chứng kết quả:** Bộ unit test `tests/test_pii.py` kiểm tra đầy đủ cả 4 mẫu PII đều pass; kiểm tra thực tế bằng `python scripts/validate_logs.py` đạt 100/100 điểm với 0 missing required, 0 missing enrichment, 0 PII leak detected và correlation IDs được truyền chuẩn xác qua các log records.
 
 ## 5. Tracing và prompt versioning
 

@@ -4,11 +4,10 @@ import hashlib
 import re
 
 PII_PATTERNS: dict[str, str] = {
-    "email": r"[\w\.-]+@[\w\.-]+\.\w+",
-    "phone_vn": r"(?<!\d)(?:\+84|0)(?:[ .-]?\d){9}(?!\d)",
-    "cccd": r"\b\d{12}\b",
-    "credit_card": r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",
-    # TODO: Add more patterns (e.g., Passport, Vietnamese address keywords)
+    "email": r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
+    "phone_vn": r"(?<!\d)(?:\+84|\(\+84\)|0)(?:[ .-]?\d){9}(?!\d)",
+    "credit_card": r"\b(?:\d{4}[- ]?){3}\d{4}\b",
+    "cccd": r"(?<!\d)\d{12}(?!\d)|\b\d{3}[- ]?\d{3}[- ]?\d{6}\b",
 }
 
 
